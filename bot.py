@@ -18,6 +18,7 @@ from datetime import datetime, timedelta
 import secrets
 import asyncio
 import aiohttp
+from aiohttp import web
 import logging
 import tempfile
 import pdfplumber
@@ -724,11 +725,32 @@ async def generate_code(user_id: int, tariff: str) -> tuple[str, str]:
     
     return code, session_id
 
+# --- Веб-сервер для проверки работоспособности ---
+async def health_check(request):
+    """Эндпоинт для проверки работоспособности"""
+    return web.Response(text="Bot is running")
+
 # --- Запуск бота ---
 async def main():
     """Основная функция запуска"""
     logger.info("Бот запускается...")
-    await dp.start_polling(bot)
+    
+    # Создаем веб-приложение
+    app = web.Application()
+    app.router.add_get('/', health_check)
+    
+    # Получаем порт из переменной окружения или используем порт по умолчанию
+    port = int(os.getenv('PORT', 8080))
+    
+    # Запускаем бота и веб-сервер
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    
+    await asyncio.gather(
+        site.start(),
+        dp.start_polling(bot)
+    )
 
 if __name__ == '__main__':
     asyncio.run(main())
