@@ -44,6 +44,7 @@ API_TOKEN = os.getenv('API_TOKEN')
 if not API_TOKEN:
     raise ValueError("API_TOKEN не найден в .env файле")
 
+WEBSITE_URL = os.getenv('WEBSITE_URL', 'http://localhost:5000')  # URL сайта для уведомлений
 admin_ids_str = os.getenv('ADMIN_IDS', '')
 ADMIN_IDS = list(map(int, admin_ids_str.split(','))) if admin_ids_str else []
 
@@ -162,13 +163,14 @@ async def notify_website(user_id: int, session_id: str):
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(
-                'http://localhost:5000/api/session_updated',
+                f"{WEBSITE_URL}/api/session_updated",
                 json={'user_id': user_id, 'session_id': session_id},
-                timeout=2
+                timeout=5  # Увеличиваем таймаут для внешнего сервера
             ):
                 pass
     except Exception as e:
         logger.error(f"Ошибка уведомления сайта: {e}")
+        logger.info(f"Попытка уведомить сайт по адресу: {WEBSITE_URL}")
 
 # --- Функции для работы с чеками ---
 def extract_text_from_pdf_sync(file_bytes: bytes) -> str:
