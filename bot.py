@@ -67,7 +67,8 @@ PAYMENT_DETAILS = {
 TARIFFS = {
     "2 минуты": 2,
     "1 час": 60,
-    "2 часа": 120
+    "2 часа": 120,
+    "1 месяц": 43200  # 30 дней * 24 часа * 60 минут
 }
 
 # Database Configuration
@@ -336,11 +337,17 @@ async def get_tariff_keyboard(user_id: int):
     """Клавиатура с тарифами"""
     builder = InlineKeyboardBuilder()
     
-    if await is_new_user(user_id):
-        builder.button(text="2 минуты (бесплатно)", callback_data="tariff_2 минуты")
-    
-    builder.button(text="1 час - 490₸", callback_data="tariff_1 час")
-    builder.button(text="2 часа - 790₸", callback_data="tariff_2 часа")
+    if user_id in ADMIN_IDS:
+        # Специальные тарифы для администраторов
+        builder.button(text="1 месяц (админ)", callback_data="tariff_1 месяц")
+        builder.button(text="2 часа (админ)", callback_data="tariff_2 часа")
+        builder.button(text="1 час (админ)", callback_data="tariff_1 час")
+    else:
+        if await is_new_user(user_id):
+            builder.button(text="2 минуты (бесплатно)", callback_data="tariff_2 минуты")
+        
+        builder.button(text="1 час - 490₸", callback_data="tariff_1 час")
+        builder.button(text="2 часа - 790₸", callback_data="tariff_2 часа")
     
     builder.adjust(1)
     return builder.as_markup()
