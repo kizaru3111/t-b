@@ -350,15 +350,20 @@ async def get_tariff_keyboard(user_id: int):
 async def cmd_start(message: Message):
     """Обработчик команды /start"""
     if not message.from_user:
+        logger.warning("Получено сообщение без данных пользователя")
         return
         
     user_id = message.from_user.id
+    logger.info(f"Получена команда /start от пользователя {user_id}")
+    
     if await is_user_blocked(user_id):
+        logger.info(f"Попытка доступа от заблокированного пользователя {user_id}")
         await message.answer("⛔ Ваш доступ к боту заблокирован")
         return
 
     await update_user_stats(user_id)
     await log_user_activity(user_id, "start")
+    logger.info(f"Пользователь {user_id} успешно начал работу с ботом")
     
     welcome_text = """
 🔥 Добро пожаловать в наш бот!
@@ -397,21 +402,25 @@ async def show_main_menu(message: Message):
 async def process_tariff(callback: CallbackQuery):
     """Обработчик выбора тарифа"""
     if not callback.message or not callback.from_user or not callback.data:
+        logger.warning("Получен неполный callback_query")
         return
         
     await callback.answer()
     tariff = callback.data.replace('tariff_', '')
-    user_tariffs[callback.from_user.id] = tariff
+    user_id = callback.from_user.id
+    logger.info(f"Пользователь {user_id} выбрал тариф: {tariff}")
+    user_tariffs[user_id] = tariff
     
-    if tariff == "2 минуты":
-        code, session_id = await generate_code(callback.from_user.id, tariff)
+    # Для администраторов все тарифы бесплатные
+    if user_id in ADMIN_IDS or tariff == "2 минуты":
+        code, session_id = await generate_code(user_id, tariff)
         await callback.message.edit_text(
-            f"✅ Ваш бесплатный код доступа: <code>{code}</code>\n"
+            f"✅ Ваш {'(админ) ' if user_id in ADMIN_IDS else 'бесплатный '}код доступа: <code>{code}</code>\n"
             f"Тариф: {tariff}\n"
             f"Срок действия: {TARIFFS[tariff]} минут",
             parse_mode="HTML"
         )
-        await notify_website(callback.from_user.id, session_id)
+        await notify_website(user_id, session_id)
         return
     
     payment_text = (
