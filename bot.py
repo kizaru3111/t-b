@@ -733,22 +733,14 @@ async def generate_code(user_id: int, tariff: str) -> tuple[str, str]:
     session_id = secrets.token_hex(8)
     code = secrets.token_hex(4)
     duration = TARIFFS[tariff]
-    
-    # Используем разные интервалы для разных тарифов
-    if tariff == "1 месяц":
-        await execute_db(
-            "INSERT INTO codes (code, user_id, session_id, duration_minutes, expires_at) "
-            "VALUES (%s, %s, %s, %s, DATE_ADD(NOW(), INTERVAL 30 DAY))",
-            (code, user_id, session_id, duration),
-        )
-    else:
-        await execute_db(
-            "INSERT INTO codes (code, user_id, session_id, duration_minutes, expires_at) "
-            "VALUES (%s, %s, %s, %s, DATE_ADD(NOW(), INTERVAL %s MINUTE))",
-            (code, user_id, session_id, duration, duration),
+    # expires_at вычисляем через UTC
+    expires_at = (datetime.utcnow() + timedelta(minutes=duration)).strftime("%Y-%m-%d %H:%M:%S")
+    await execute_db(
+        "INSERT INTO codes (code, user_id, session_id, duration_minutes, expires_at) "
+        "VALUES (%s, %s, %s, %s, %s)",
+        (code, user_id, session_id, duration, expires_at),
         commit=True
     )
-    
     return code, session_id
 
 # --- Веб-сервер для проверки работоспособности ---
