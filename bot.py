@@ -769,7 +769,7 @@ async def generate_code(user_id: int, tariff: str) -> tuple[str, str]:
     logger.info(f"Generated code for user {user_id}: {code} (tariff: {tariff})")
     
     try:
-        # Проверяем, не существует ли уже такой код
+        # Проверяем уникальность кода
         check = await execute_db(
             "SELECT code FROM codes WHERE code = %s",
             (code,),
@@ -780,48 +780,45 @@ async def generate_code(user_id: int, tariff: str) -> tuple[str, str]:
             logger.warning(f"Code {code} already exists, generating new one")
             return await generate_code(user_id, tariff)
         
-        # Формируем SQL запрос в зависимости от тарифа
-        if tariff == "1 месяц":
-            result = await execute_db(
-                "INSERT INTO codes (code, user_id, session_id, duration_minutes, expires_at, is_used) "
-                "VALUES (%s, %s, %s, %s, DATE_ADD(NOW(), INTERVAL 30 DAY), FALSE)",
-                (code, user_id, session_id, duration),
-                commit=True
-            )
-        else:
-            result = await execute_db(
-                "INSERT INTO codes (code, user_id, session_id, duration_minutes, expires_at, is_used) "
-                "VALUES (%s, %s, %s, %s, DATE_ADD(NOW(), INTERVAL %s MINUTE), FALSE)",
-                (code, user_id, session_id, duration, duration),
-                commit=True
-            )
+        # Создаем новый код
+        sql = """
+            INSERT INTO codes 
+            (code, user_id, session_id, duration_minutes, expires_at, is_used) 
+            VALUES 
+            (%s, %s, %s, %s, DATE_ADD(NOW(), INTERVAL {} {}), FALSE)
+        """
         
+        # Определяем параметры в зависимости от тарифа
+        if tariff == "1 месяц":
+            sql = sql.format("30", "DAY")
+            params = [code, user_id, session_id, duration]
+        else:
+            sql = sql.format("%s", "MINUTE")
+            params = [code, user_id, session_id, duration, duration]
+        
+        # Выполняем вставку
+        result = await execute_db(sql, params, commit=True)
         if not result:
             logger.error(f"Failed to insert code {code}")
             return await generate_code(user_id, tariff)
         
-        # Проверяем, что код сохранился
+        # Проверяем результат
         verify = await execute_db(
             "SELECT code FROM codes WHERE code = %s AND user_id = %s",
-            (code, user_id),
+            [code, user_id],
             fetch_one=True
         )
         
         if not verify:
-            logger.error(f"Code {code} verification failed")
+            logger.error(f"Code verification failed for {code}")
             return await generate_code(user_id, tariff)
         
-        logger.info(f"Successfully generated and saved code {code} for user {user_id}")
+        logger.info(f"Code {code} successfully generated and saved")
         return code, session_id
-    
+        
     except Exception as e:
-        logger.error(f"Error in generate_code: {str(e)}")
+        logger.error(f"Error generating code: {str(e)}")
         return await generate_code(user_id, tariff)
-            (code, user_id, session_id, duration, duration),
-        commit=True
-    )
-    
-    return code, session_id
 
 # --- Веб-сервер для проверки работоспособности ---
 async def health_check(request):
