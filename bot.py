@@ -781,25 +781,24 @@ async def generate_code(user_id: int, tariff: str) -> tuple[str, str]:
             return await generate_code(user_id, tariff)
         
         # Используем разные интервалы для разных тарифов
+        query = (
+            "INSERT INTO codes (code, user_id, session_id, duration_minutes, expires_at, is_used) "
+            "VALUES (%s, %s, %s, %s, DATE_ADD(NOW(), INTERVAL {} {}), FALSE)"
+        )
+        
         if tariff == "1 месяц":
-            result = await execute_db(
-                "INSERT INTO codes (code, user_id, session_id, duration_minutes, expires_at, is_used) "
-                "VALUES (%s, %s, %s, %s, DATE_ADD(NOW(), INTERVAL 30 DAY), FALSE)",
-                (code, user_id, session_id, duration),
-                commit=True
-            )
+            final_query = query.format(30, "DAY")
+            params = (code, user_id, session_id, duration)
         else:
-            result = await execute_db(
-                "INSERT INTO codes (code, user_id, session_id, duration_minutes, expires_at, is_used) "
-                "VALUES (%s, %s, %s, %s, DATE_ADD(NOW(), INTERVAL %s MINUTE), FALSE)",
-                (code, user_id, session_id, duration, duration),
-                commit=True
-            )
-            
+            final_query = query.format("%s", "MINUTE")
+            params = (code, user_id, session_id, duration, duration)
+        
+        result = await execute_db(final_query, params, commit=True)
+        
         if not result:
             logger.error(f"Failed to insert code {code}")
             return await generate_code(user_id, tariff)
-            
+        
         # Проверяем, что код сохранился
         verify = await execute_db(
             "SELECT code FROM codes WHERE code = %s AND user_id = %s",
@@ -810,7 +809,7 @@ async def generate_code(user_id: int, tariff: str) -> tuple[str, str]:
         if not verify:
             logger.error(f"Code {code} verification failed")
             return await generate_code(user_id, tariff)
-            
+        
         logger.info(f"Successfully generated and saved code {code} for user {user_id}")
         return code, session_id
         
