@@ -769,7 +769,7 @@ async def generate_code(user_id: int, tariff: str) -> tuple[str, str]:
     logger.info(f"Generated code for user {user_id}: {code} (tariff: {tariff})")
     
     try:
-        # Сначала проверяем, не существует ли уже такой код
+        # Проверяем, не существует ли уже такой код
         check = await execute_db(
             "SELECT code FROM codes WHERE code = %s",
             (code,),
@@ -780,20 +780,21 @@ async def generate_code(user_id: int, tariff: str) -> tuple[str, str]:
             logger.warning(f"Code {code} already exists, generating new one")
             return await generate_code(user_id, tariff)
         
-        # Используем разные интервалы для разных тарифов
-        query = (
-            "INSERT INTO codes (code, user_id, session_id, duration_minutes, expires_at, is_used) "
-            "VALUES (%s, %s, %s, %s, DATE_ADD(NOW(), INTERVAL {} {}), FALSE)"
-        )
-        
+        # Формируем SQL запрос в зависимости от тарифа
         if tariff == "1 месяц":
-            final_query = query.format(30, "DAY")
-            params = (code, user_id, session_id, duration)
+            result = await execute_db(
+                "INSERT INTO codes (code, user_id, session_id, duration_minutes, expires_at, is_used) "
+                "VALUES (%s, %s, %s, %s, DATE_ADD(NOW(), INTERVAL 30 DAY), FALSE)",
+                (code, user_id, session_id, duration),
+                commit=True
+            )
         else:
-            final_query = query.format("%s", "MINUTE")
-            params = (code, user_id, session_id, duration, duration)
-        
-        result = await execute_db(final_query, params, commit=True)
+            result = await execute_db(
+                "INSERT INTO codes (code, user_id, session_id, duration_minutes, expires_at, is_used) "
+                "VALUES (%s, %s, %s, %s, DATE_ADD(NOW(), INTERVAL %s MINUTE), FALSE)",
+                (code, user_id, session_id, duration, duration),
+                commit=True
+            )
         
         if not result:
             logger.error(f"Failed to insert code {code}")
@@ -812,10 +813,9 @@ async def generate_code(user_id: int, tariff: str) -> tuple[str, str]:
         
         logger.info(f"Successfully generated and saved code {code} for user {user_id}")
         return code, session_id
-        
+    
     except Exception as e:
         logger.error(f"Error in generate_code: {str(e)}")
-        # В случае ошибки пробуем еще раз
         return await generate_code(user_id, tariff)
             (code, user_id, session_id, duration, duration),
         commit=True
