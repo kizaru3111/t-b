@@ -119,44 +119,75 @@ def get_db():
 
 async def execute_db(query: str, params=None, fetch_one=False, fetch_all=False, commit=False) -> dict | list[dict] | bool | None:
     """Выполняет SQL запрос с обработкой ошибок"""
-    conn = None
-    cursor = None
-    try:
-        conn = get_db()
-        if not conn:
-            return None
+    retries = 3
+    delay = 1  # начальная задержка в секундах
+    last_error = None
+    
+    for attempt in range(retries):
+        conn = None
+        cursor = None
+        try:
+            conn = get_db()
+            if not conn:
+                logger.error("Failed to get database connection")
+                await asyncio.sleep(delay)
+                delay *= 2
+                continue
+                
+            cursor = conn.cursor(dictionary=True, buffered=True)
+            cursor.execute(query, params or ())
             
-        cursor = conn.cursor(dictionary=True, buffered=True)  # Используем буферизованный курсор
-        cursor.execute(query, params or ())
-        
-        if commit:
-            conn.commit()
-            result: bool = True
-        elif fetch_one:
-            result: dict | None = cursor.fetchone()
-        elif fetch_all:
-            result: list[dict] = cursor.fetchall() or []
-        else:
-            result: bool = True
+            if commit:
+                conn.commit()
+                result = True
+            elif fetch_one:
+                result = cursor.fetchone()
+            elif fetch_all:
+                result = cursor.fetchall() or []
+            else:
+                result = True
+                
+            return result
             
-        return result
-    except Exception as e:
-        logger.error(f"Ошибка выполнения запроса: {e}")
-        return None
-    finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            try:
-                # Убеждаемся, что все результаты получены
-                while conn.unread_result:
-                    cursor = conn.cursor(dictionary=True, buffered=True)
-                    cursor.fetchall()
+        except mysql.connector.Error as e:
+            last_error = e
+            logger.error(f"Database error (attempt {attempt + 1}/{retries}): {str(e)}")
+            if attempt < retries - 1:
+                await asyncio.sleep(delay)
+                delay *= 2
+            continue
+            
+        except Exception as e:
+            last_error = e
+            logger.error(f"Unexpected error in execute_db: {str(e)}")
+            if attempt < retries - 1:
+                await asyncio.sleep(delay)
+                delay *= 2
+            continue
+            
+        finally:
+            if cursor:
+                try:
                     cursor.close()
-            except Exception:
-                pass
-            finally:
-                conn.close()
+                except Exception:
+                    pass
+            if conn:
+                try:
+                    while conn.unread_result:
+                        cursor = conn.cursor(dictionary=True, buffered=True)
+                        cursor.fetchall()
+                        cursor.close()
+                except Exception:
+                    pass
+                finally:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+    
+    if last_error:
+        logger.error(f"All retries failed. Last error: {str(last_error)}")
+    return None
 
 async def notify_website(user_id: int, session_id: str):
     """Уведомляет сайт об обновлении сессии"""
@@ -737,17 +768,56 @@ async def generate_code(user_id: int, tariff: str) -> tuple[str, str]:
     # Логируем генерируемый код для отладки
     logger.info(f"Generated code for user {user_id}: {code} (tariff: {tariff})")
     
-    # Используем разные интервалы для разных тарифов
-    if tariff == "1 месяц":
-        await execute_db(
-            "INSERT INTO codes (code, user_id, session_id, duration_minutes, expires_at) "
-            "VALUES (%s, %s, %s, %s, DATE_ADD(NOW(), INTERVAL 30 DAY))",
-            (code, user_id, session_id, duration),
+    try:
+        # Сначала проверяем, не существует ли уже такой код
+        check = await execute_db(
+            "SELECT code FROM codes WHERE code = %s",
+            (code,),
+            fetch_one=True
         )
-    else:
-        await execute_db(
-            "INSERT INTO codes (code, user_id, session_id, duration_minutes, expires_at) "
-            "VALUES (%s, %s, %s, %s, DATE_ADD(NOW(), INTERVAL %s MINUTE))",
+        
+        if check:
+            logger.warning(f"Code {code} already exists, generating new one")
+            return await generate_code(user_id, tariff)
+        
+        # Используем разные интервалы для разных тарифов
+        if tariff == "1 месяц":
+            result = await execute_db(
+                "INSERT INTO codes (code, user_id, session_id, duration_minutes, expires_at, is_used) "
+                "VALUES (%s, %s, %s, %s, DATE_ADD(NOW(), INTERVAL 30 DAY), FALSE)",
+                (code, user_id, session_id, duration),
+                commit=True
+            )
+        else:
+            result = await execute_db(
+                "INSERT INTO codes (code, user_id, session_id, duration_minutes, expires_at, is_used) "
+                "VALUES (%s, %s, %s, %s, DATE_ADD(NOW(), INTERVAL %s MINUTE), FALSE)",
+                (code, user_id, session_id, duration, duration),
+                commit=True
+            )
+            
+        if not result:
+            logger.error(f"Failed to insert code {code}")
+            return await generate_code(user_id, tariff)
+            
+        # Проверяем, что код сохранился
+        verify = await execute_db(
+            "SELECT code FROM codes WHERE code = %s AND user_id = %s",
+            (code, user_id),
+            fetch_one=True
+        )
+        
+        if not verify:
+            logger.error(f"Code {code} verification failed")
+            return await generate_code(user_id, tariff)
+            
+        logger.info(f"Successfully generated and saved code {code} for user {user_id}")
+        return code, session_id
+        
+    except Exception as e:
+        logger.error(f"Error in generate_code: {str(e)}")
+        # В случае ошибки пробуем еще раз
+        return await generate_code(user_id, tariff)
             (code, user_id, session_id, duration, duration),
         commit=True
     )
