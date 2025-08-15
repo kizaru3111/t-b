@@ -734,6 +734,9 @@ async def generate_code(user_id: int, tariff: str) -> tuple[str, str]:
     code = secrets.token_hex(4)
     duration = TARIFFS[tariff]
     
+    # Логируем генерируемый код для отладки
+    logger.info(f"Generated code for user {user_id}: {code} (tariff: {tariff})")
+    
     # Используем разные интервалы для разных тарифов
     if tariff == "1 месяц":
         await execute_db(
